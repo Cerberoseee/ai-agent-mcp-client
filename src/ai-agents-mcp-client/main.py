@@ -1,14 +1,13 @@
-from fastapi import FastAPI, HTTPException, Depends
-from typing import Optional
+from fastapi import FastAPI
 import uvicorn
 import logging
 import os
 from dotenv import load_dotenv
 
 from colorama import Fore, Style
-from products.product_dto import ProductRequest, ProductResponse
-from mcp_client import MCPClient
-from products.product_service import ProductService
+from core.client_manager import ClientManager
+from products import router as product_module_router
+from products.product_performance_controller import router as performance_router
 
 load_dotenv()
 
@@ -49,28 +48,31 @@ app = FastAPI(
     docs_url="/docs",
 )
 
-mcp_client = MCPClient()
-
 @app.on_event("startup")
 async def startup_event():
-    server_script_path = os.getenv("MCP_SERVER_SCRIPT_PATH", "path/to/your/server/script.py")
-    await mcp_client.connect_to_server(server_script_path)
+    server_script_path = os.getenv("MCP_SERVER_SCRIPT_PATH")
+    if not server_script_path:
+        raise ValueError("MCP_SERVER_SCRIPT_PATH environment variable is not set")
+    await ClientManager.initialize(server_script_path)
+    logger.info("MCP Client initialized successfully")
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    await mcp_client.exit_stack.aclose()
-
-def get_product_service() -> ProductService:
-    return ProductService(mcp_client)
+    await ClientManager.cleanup()
+    logger.info("MCP Client cleaned up successfully")
 
 @app.get("/health-check")
 async def health_check():
     return {"status": "healthy"}
 
+# Include routers
+app.include_router(product_module_router)
+app.include_router(performance_router, prefix="/products", tags=["product-performance"])
+
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8000,
+        port=int(os.getenv("PORT", 8000)),
         reload=True
     ) 

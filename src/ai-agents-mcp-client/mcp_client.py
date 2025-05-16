@@ -1,5 +1,3 @@
-import asyncio
-
 from dotenv import load_dotenv
 from typing import Optional
 from contextlib import AsyncExitStack
