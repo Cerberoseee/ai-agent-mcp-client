@@ -24,23 +24,14 @@ class ProductPerformanceRequest(BaseModel):
     productDetails: Dict[str, Any]
 
 class AdjustmentSuggestion(BaseModel):
-    type: str  # e.g., "price", "description", "promotion"
+    type: str 
     current_value: Any
     suggested_value: Any
-    reasoning: str
-    confidence: float
-    priority: int
 
-class ProductPerformanceAnalysis(BaseModel):
-    product_id: str
-    performance_change: float
-    market_analysis: str
+class AnalysisResponse(BaseModel):
+    analysis: str
     suggested_adjustments: List[AdjustmentSuggestion]
-    analysis_summary: str
 
 class ApprovalRequest(BaseModel):
-    analysis_id: str
     product_id: str
     suggested_adjustments: List[AdjustmentSuggestion]
-    approval_status: Optional[str] = "pending"  # pending, approved, rejected
-    approval_notes: Optional[str] = None

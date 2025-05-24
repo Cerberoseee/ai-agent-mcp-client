@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Dict, Any
-from .product_dto import ProductPerformanceRequest, ProductPerformanceAnalysis, ApprovalRequest
+from .product_dto import ProductPerformanceRequest, ApprovalRequest, AnalysisResponse
 from .product_performance_service import ProductPerformanceService
 from core.client_manager import ClientManager
 
@@ -9,11 +9,11 @@ router = APIRouter()
 def get_performance_service() -> ProductPerformanceService:
     return ProductPerformanceService(ClientManager.get_mcp_client())
 
-@router.post("/analyze-performance", response_model=ProductPerformanceAnalysis)
+@router.post("/analyze-performance", response_model=AnalysisResponse)
 async def analyze_product_performance(
     request: ProductPerformanceRequest,
     service: ProductPerformanceService = Depends(get_performance_service)
-) -> ProductPerformanceAnalysis:
+) -> AnalysisResponse:
     """
     Analyze product performance and suggest improvements based on sales decline.
     """
@@ -22,18 +22,16 @@ async def analyze_product_performance(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/process-approval/{analysis_id}")
+@router.post("/process-approval")
 async def process_approval(
-    analysis_id: str,
-    approved: bool,
-    notes: str = None,
+    request: ApprovalRequest,
     service: ProductPerformanceService = Depends(get_performance_service)
 ) -> Dict[str, Any]:
     """
     Process approval or rejection of suggested product adjustments.
     """
     try:
-        return await service.process_approval(analysis_id, approved, notes)
+        return await service.process_approval(request)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
