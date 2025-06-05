@@ -35,3 +35,14 @@ class AnalysisResponse(BaseModel):
 class ApprovalRequest(BaseModel):
     product_id: str
     suggested_adjustments: List[AdjustmentSuggestion]
+
+class LaunchPlanResponse(BaseModel):
+    """Response model for new product launch plan"""
+    product_id: str
+    opportunity_score: float
+    recommendation: str
+    launch_price: float
+    initial_inventory: int
+    expected_roi: float
+    marketing_content: Dict[str, Any]
+    launch_timeline_days: int
