@@ -6,8 +6,10 @@ from dotenv import load_dotenv
 
 from colorama import Fore, Style
 from core.client_manager import ClientManager
+from core.vector_db import VectorDatabase
 from products import router as product_module_router
 from products.product_performance_controller import router as performance_router
+from recommendations.recommendations_controller import router as recommendations_router
 
 load_dotenv()
 
@@ -55,11 +57,22 @@ async def startup_event():
         raise ValueError("MCP_SERVER_SCRIPT_PATH environment variable is not set")
     await ClientManager.initialize(server_script_path)
     logger.info("MCP Client initialized successfully")
+    
+    # Initialize vector database
+    mongodb_uri = os.getenv("MONGODB_URI")
+    if VectorDatabase.initialize(mongodb_uri):
+        logger.info("Vector database initialized successfully")
+    else:
+        logger.warning("Vector database initialization failed. Vector search functionality may be limited.")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     await ClientManager.cleanup()
     logger.info("MCP Client cleaned up successfully")
+    
+    # Clean up vector database connection
+    VectorDatabase.cleanup()
+    logger.info("Vector database connection closed")
 
 @app.get("/health-check")
 async def health_check():
@@ -68,6 +81,7 @@ async def health_check():
 # Include routers
 app.include_router(product_module_router)
 app.include_router(performance_router, prefix="/products", tags=["product-performance"])
+app.include_router(recommendations_router)
 
 if __name__ == "__main__":
     uvicorn.run(
