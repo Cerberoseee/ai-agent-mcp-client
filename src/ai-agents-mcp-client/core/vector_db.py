@@ -54,14 +54,13 @@ class VectorDatabase:
     @classmethod
     def store_embedding(
         cls, 
-        keyword: str, 
+        collection_name: str,
         embedding: List[float], 
         metadata: Dict[Any, Any] = None
     ) -> str:
-        collection = cls.get_collection()
+        collection = cls.get_collection(collection_name)
         
         document = {
-            "keyword": keyword,
             "embedding": embedding,
             "metadata": metadata or {}
         }
@@ -70,13 +69,12 @@ class VectorDatabase:
         return str(result.inserted_id)
     
     @classmethod
-    def batch_store_embeddings(cls, keyword_embeddings: List[Dict[str, Any]]) -> List[str]:
-        collection = cls.get_collection()
+    def batch_store_embeddings(cls, collection_name: str, keyword_embeddings: List[Dict[str, Any]]) -> List[str]:
+        collection = cls.get_collection(collection_name)
         
         documents = []
         for item in keyword_embeddings:
             documents.append({
-                "keyword": item["keyword"],
                 "embedding": item["embedding"],
                 "metadata": item.get("metadata", {})
             })
@@ -102,14 +100,6 @@ class VectorDatabase:
                     "limit": limit,
                     "numCandidates": limit * 10,
                     "minScore": min_score
-                }
-            },
-            {
-                "$project": {
-                    "_id": 0,
-                    "keyword": 1,
-                    "metadata": 1,
-                    "score": {"$meta": "vectorSearchScore"}
                 }
             }
         ])
