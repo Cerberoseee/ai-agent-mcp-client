@@ -217,15 +217,15 @@ class RecommendationsService:
                 - Willing to invest in quality gear for hobbies.
             - **Engagement Patterns:**
                 - Often explores product reviews and specifications in depth before purchasing.
-
         """
-        
+        follow_up_messages.append({
+            "role": "user",
+            "content": follow_up_prompt
+        })
+
         response = await self.mcp_client.session.chat.completions.create(
             model="gpt-4o-mini",
-            messages=follow_up_messages + [{
-                "role": "user",
-                "content": follow_up_prompt
-            }],
+            messages=follow_up_messages,
         )
 
         return BuildUserProfileResponse(result=response.choices[0].message.content)
