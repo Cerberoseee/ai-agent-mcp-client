@@ -13,6 +13,7 @@ import asyncio
 from preprocess.preprocess_service import PreprocessService
 from preprocess.preprocess_dto import AddDocsToCollectionDto, SummaryContentDto
 from .recommendations_dto import BuildUserProfileRequest, BuildUserProfileResponse
+from collections import defaultdict
 
 class RecommendationsService:
     mcp_client: MCPClient
@@ -101,10 +102,36 @@ class RecommendationsService:
 
         similar_results = VectorDatabase.find_similar(
             query_embedding=query_term,
-            limit=5
+            limit=30
         )
 
-        product_ids = [result.metadata["product_id"] for result in similar_results]
+        product_scores = defaultdict(list)
+        for result in similar_results:
+            product_id = result["metadata"].get("product_id")
+            score = result.get("score", 0)
+            if product_id:
+                product_scores[product_id].append(score)
+
+        all_counts = [len(scores) for scores in product_scores.values()]
+        all_avg_scores = [sum(scores)/len(scores) for scores in product_scores.values()]
+
+        max_count = max(all_counts) if all_counts else 1
+        max_avg_score = max(all_avg_scores) if all_avg_scores else 1
+
+        weight = 0.5
+
+        product_rankings = []
+        for product_id, scores in product_scores.items():
+            count = len(scores)
+            avg_score = sum(scores) / count if count else 0
+            quantity_weight = count / max_count if max_count else 0
+            distance_weight = avg_score / max_avg_score if max_avg_score else 0
+            final_score = weight * quantity_weight + (1 - weight) * distance_weight
+            product_rankings.append((product_id, final_score))
+
+        product_rankings.sort(key=lambda x: x[1], reverse=True)
+
+        product_ids = [product_id for product_id, _ in product_rankings]
 
         return GetMostRelevantProductsResponse(result=product_ids)
 
