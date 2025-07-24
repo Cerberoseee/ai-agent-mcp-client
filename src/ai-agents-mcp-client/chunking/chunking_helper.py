@@ -164,6 +164,46 @@ class ArticleSection:
 
     def __str__(self) -> str:
         return f"Section(heading='{self.heading}', level={self.level}, content_length={len(self.content)})"
+class MarkdownSection:
+    def __init__(self, heading: str, heading_tag: str, content: List[str], level: int):
+        self.heading = heading
+        self.heading_tag = heading_tag
+        self.content = content
+        self.level = level
+
+def format_markdown_article(raw_markdown: str) -> List[MarkdownSection]:
+    try:
+        sections: List[MarkdownSection] = []
+        current_heading = None
+        current_heading_tag = None
+        current_level = 1
+        current_content: List[str] = []
+        for line in raw_markdown.splitlines():
+            if line.startswith('#'):
+                if current_heading:
+                    sections.append(
+                        MarkdownSection(
+                            heading=current_heading,
+                            heading_tag=current_heading_tag,
+                            content=current_content.copy(),
+                            level=current_level,
+                        )
+                    )
+                current_heading = line.strip()
+                current_heading_tag = 'h' + str(len(line) - len(line.lstrip('#')))
+                current_level = int(len(line) - len(line.lstrip('#')))
+                current_content = []
+            else:
+                if not current_heading:
+                    current_heading = line.strip()
+                    current_heading_tag = 'p'
+                else:
+                    current_content.append(line)
+        return sections
+    except Exception as e:
+        logging.error(f"Error processing markdown content: {e}")
+        raise Exception("Error when formatting markdown data: " + str(e))
+
 
 def format_loader_article(raw_html: str) -> List[ArticleSection]:
     try:

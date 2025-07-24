@@ -1,114 +1,70 @@
 import logging
 from typing import List, Dict, Any, Optional
-from pymongo import MongoClient
-from pymongo.collection import Collection
-from pymongo.database import Database
 import os
+import uuid
+import pinecone
+
+from dotenv import load_dotenv
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 class VectorDatabase:
     _instance = None
-    _client: Optional[MongoClient] = None
-    _db: Optional[Database] = None
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(VectorDatabase, cls).__new__(cls)
-        return cls._instance
-    
+    _index = None
+
     @classmethod
-    def initialize(cls, db_name: str = "vector_db"):
-        connection_string = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
-        
-        try:
-            cls._client = MongoClient(connection_string)
-            cls._db = cls._client[db_name]
-            cls._client.admin.command('ping')
-            logger.info("Vector database connection established successfully")
-            
-            cls._ensure_vector_indexes()
-            
-            return True
-        except Exception as e:
-            logger.error(f"Failed to connect to vector database: {e}")
-            return False
-    
-    @classmethod
-    def _ensure_vector_indexes(cls):
-        if "embeddings" not in cls._db.list_collection_names():
-            cls._db.create_collection("embeddings")
-            
-        try:
-            cls._db.embeddings.create_index([("embedding", "vector")])
-            logger.info("Vector index created successfully")
-        except Exception as e:
-            logger.warning(f"Could not create vector index: {e}. Vector search may not work properly.")
-    
-    @classmethod
-    def get_collection(cls, collection_name: str = "embeddings") -> Collection:
-        if cls._db is None:
-            raise ValueError("Vector database not initialized. Call initialize() first.")
-        return cls._db[collection_name]
-    
-    @classmethod
-    def store_embedding(
-        cls, 
-        collection_name: str,
-        embedding: List[float], 
-        metadata: Dict[Any, Any] = None
-    ) -> str:
-        collection = cls.get_collection(collection_name)
-        
-        document = {
-            "embedding": embedding,
-            "metadata": metadata or {}
+    def initialize(cls):
+        api_key = os.getenv("PINECONE_API_KEY")
+        environment = os.getenv("PINECONE_ENVIRONMENT")
+        index_name = os.getenv("PINECONE_INDEX_NAME", "vector_index")
+        host = os.getenv("PINECONE_HOST", "http://localhost:5080")  
+
+        pinecone_client = pinecone.Pinecone(api_key=api_key, environment=environment, host=host)
+
+        index_spec = {
+            "serverless": {
+                "cloud": "aws",
+                "region": "us-east-1"
+            }
         }
+        indexes = pinecone_client.list_indexes()
+
+        if not any(idx.get("name") == index_name for idx in indexes):
+            pinecone_client.create_index(index_name, dimension=768, metric="cosine", spec=index_spec)
+        else:
+            logger.info(f"Index '{index_name}' already exists. Skipping creation.")
         
-        result = collection.insert_one(document)
-        return str(result.inserted_id)
-    
+        cls._index = pinecone_client.Index(index_name)
+        logger.info("Pinecone index initialized successfully")
+        return True
+
+    @classmethod
+    def store_embedding(cls, collection_name: str, embedding: List[float], metadata: Dict[Any, Any] = None) -> str:
+        if cls._index is None:
+            raise ValueError("Pinecone index not initialized. Call initialize() first.")
+
+        vector_id = str(uuid.uuid4())
+        cls._index.upsert([(vector_id, embedding, metadata)])
+        return vector_id
+
     @classmethod
     def batch_store_embeddings(cls, collection_name: str, keyword_embeddings: List[Dict[str, Any]]) -> List[str]:
-        collection = cls.get_collection(collection_name)
-        
-        documents = []
-        for item in keyword_embeddings:
-            documents.append({
-                "embedding": item["embedding"],
-                "metadata": item.get("metadata", {})
-            })
-        
-        result = collection.insert_many(documents)
-        return [str(id) for id in result.inserted_ids]
-    
+        if cls._index is None:
+            raise ValueError("Pinecone index not initialized. Call initialize() first.")
+
+        vectors = [(str(uuid.uuid4()), item["embedding"], item.get("metadata", {})) for item in keyword_embeddings]
+        cls._index.upsert(vectors)
+        return [vector[0] for vector in vectors]
+
     @classmethod
-    def find_similar(
-        cls, 
-        query_embedding: List[float], 
-        limit: int = 5, 
-        min_score: float = 0.7
-    ) -> List[Dict[str, Any]]:
-        collection = cls.get_collection()
-        
-        results = collection.aggregate([
-            {
-                "$vectorSearch": {
-                    "index": "embedding",
-                    "path": "embedding",
-                    "queryVector": query_embedding,
-                    "limit": limit,
-                    "numCandidates": limit * 10,
-                    "minScore": min_score
-                }
-            }
-        ])
-        
-        return list(results)
-    
+    def find_similar(cls, query_embedding: List[float], limit: int = 5, min_score: float = 0.7) -> List[Dict[str, Any]]:
+        if cls._index is None:
+            raise ValueError("Pinecone index not initialized. Call initialize() first.")
+
+        results = cls._index.query(query_embedding, top_k=limit, include_metadata=True)
+        return [result for result in results if result['score'] >= min_score]
+
     @classmethod
     def cleanup(cls):
-        if cls._client:
-            cls._client.close()
-            cls._client = None
-            cls._db = None
+        cls._index = None

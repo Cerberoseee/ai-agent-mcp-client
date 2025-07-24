@@ -13,7 +13,7 @@ class GetEmbeddingsResponse(BaseModel):
     result: list[KeywordWithEmbedding]
 
 class BuildUserProfileRequest(BaseModel):
-    user_id: str
+    customer_id: str
 
 class BuildUserProfileResponse(BaseModel):
     result: str

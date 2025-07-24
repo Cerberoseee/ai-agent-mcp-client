@@ -92,7 +92,7 @@ class RecommendationsService:
             Return only the query term, with no other text, no explanation, no markdown, no formatting.
         """
 
-        query_term = await self.mcp_client.session.chat.completions.create(
+        query_term = await self.mcp_client.client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": prompt},
@@ -150,18 +150,18 @@ class RecommendationsService:
             {
                 "role": "system",
                 "content": """
-                You are a user profile builder. Based on the tools provided, call the tools to build the user profile.
+                You are a customer profile builder. Based on the tools provided, call the tools to build the customer profile.
                 """
             },
             {
                 "role": "user",
                 "content": f"""
-                User id: {request.user_id}
+                Customer id: {request.customer_id}
                 """
             }
         ]
 
-        completion = await self.mcp_client.session.chat.completions.create(
+        completion = await self.mcp_client.client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
             tools=available_tools
@@ -208,10 +208,10 @@ class RecommendationsService:
                 })
         
         follow_up_prompt = """
-            Based on this data, build the user profile based on this template:
-            ### User Profile Summary ###
+            Based on this data, build the customer profile based on this template:
+            ### Customer Profile Summary ###
 
-            **User ID:** [user_id]
+            **Customer ID:** [Customer ID]
             **Demographics (if available and relevant):**
             - Age Group: [e.g., Young Adult (18-24)]
             - Location: [e.g., Ho Chi Minh City, Vietnam]
@@ -250,7 +250,7 @@ class RecommendationsService:
             "content": follow_up_prompt
         })
 
-        response = await self.mcp_client.session.chat.completions.create(
+        response = await self.mcp_client.client.chat.completions.create(
             model="gpt-4o-mini",
             messages=follow_up_messages,
         )

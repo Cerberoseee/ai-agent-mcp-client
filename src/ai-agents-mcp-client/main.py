@@ -10,6 +10,7 @@ from core.vector_db import VectorDatabase
 from products import router as product_module_router
 from products.product_performance_controller import router as performance_router
 from recommendations.recommendations_controller import router as recommendations_router
+from order_processing.order_processing_controller import router as order_processing_router
 
 load_dotenv()
 
@@ -59,8 +60,7 @@ async def startup_event():
     logger.info("MCP Client initialized successfully")
     
     # Initialize vector database
-    mongodb_uri = os.getenv("MONGODB_URI")
-    if VectorDatabase.initialize(mongodb_uri):
+    if VectorDatabase.initialize():
         logger.info("Vector database initialized successfully")
     else:
         logger.warning("Vector database initialization failed. Vector search functionality may be limited.")
@@ -81,7 +81,8 @@ async def health_check():
 # Include routers
 app.include_router(product_module_router)
 app.include_router(performance_router, prefix="/products", tags=["product-performance"])
-app.include_router(recommendations_router)
+app.include_router(recommendations_router, prefix="/recommendations", tags=["recommendations"])
+app.include_router(order_processing_router, prefix="/order-processing", tags=["order-processing"])
 
 if __name__ == "__main__":
     uvicorn.run(
