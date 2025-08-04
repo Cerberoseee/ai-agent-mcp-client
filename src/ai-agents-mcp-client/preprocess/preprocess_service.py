@@ -9,12 +9,9 @@ class PreprocessService:
     client: OpenAI
 
     def __init__(self, mcp_client: MCPClient):
-        self.client = OpenAI(
-            api_key=mcp_client.api_key
-        )
+        self.client = mcp_client.client
         self.embedding_client = OpenAIEmbeddings(
             model="text-embedding-3-large",
-            api_key=mcp_client.api_key
         )
 
     async def add_docs(self, payload: AddDocsToCollectionDto):
@@ -27,9 +24,8 @@ class PreprocessService:
             embedding = embedding if payload.texts[i] else [0] * len(embedding)
             doc_data = {
                 "embedding": embedding,
+                "metadata": metadatas[i]
             }
-            if len(metadatas) > i and metadatas[i] is not None:
-                doc_data.update(metadatas[i])
             data.append(doc_data)
 
         VectorDatabase.batch_store_embeddings(

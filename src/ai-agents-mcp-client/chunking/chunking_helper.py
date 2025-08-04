@@ -178,7 +178,7 @@ def format_markdown_article(raw_markdown: str) -> List[MarkdownSection]:
         current_heading_tag = None
         current_level = 1
         current_content: List[str] = []
-        for line in raw_markdown.splitlines():
+        for line in raw_markdown.replace('\\n', '\n').splitlines():
             if line.startswith('#'):
                 if current_heading:
                     sections.append(

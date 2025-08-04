@@ -23,3 +23,6 @@ class GetMostRelevantProductsRequest(BaseModel):
 
 class GetMostRelevantProductsResponse(BaseModel):
     result: list[str]
+
+class BuildUserProfileTool(BaseModel):
+    customer_id: str

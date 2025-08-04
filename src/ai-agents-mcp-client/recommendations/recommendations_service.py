@@ -14,103 +14,143 @@ from preprocess.preprocess_service import PreprocessService
 from preprocess.preprocess_dto import AddDocsToCollectionDto, SummaryContentDto
 from .recommendations_dto import BuildUserProfileRequest, BuildUserProfileResponse
 from collections import defaultdict
+import logging
 
 class RecommendationsService:
     mcp_client: MCPClient
     chunking_service: ChunkingService
     preprocess_service: PreprocessService
     openai_context_limit = 1000
+    logger = logging.getLogger(__name__)
+    weight_exponent = 1.5
 
     def __init__(self, mcp_client: MCPClient):
         self.mcp_client = mcp_client
         self.chunking_service = ChunkingService()
-        self.preprocess_service = PreprocessService()
+        self.preprocess_service = PreprocessService(self.mcp_client)
 
     async def add_product_to_vector_db(self, request: GetEmbeddingsRequest):
-        document_chunks = await self.chunking_service.chunk_document(document=request.description)
-        collection_name = f"vector_products"
-        tasks = []
-        for section in document_chunks.sections:
-            section_id = section.get_id()
-            sentence_tasks = []
-            for paragraph in section.paragraphs:
-                paragraph_id = paragraph.get_id()
-                sentence_tasks.append(
+        try:
+            document_chunks = await self.chunking_service.chunk_document(document=request.description)
+            collection_name = f"vector_products"
+            tasks = []
+            for section in document_chunks.sections:
+                section_id = section.get_id()
+                sentence_tasks = []
+                for paragraph in section.paragraphs:
+                    paragraph_id = paragraph.get_id()
+                    sentence_tasks.append(
+                        self.preprocess_service.add_docs(
+                            AddDocsToCollectionDto(
+                                texts=[
+                                    sentence.get_content()
+                                    for sentence in paragraph.sentences
+                                ],
+                                collection_name=collection_name,
+                                metadatas=[
+                                    {
+                                        "product_id": request.product_id,
+                                        "section_id": str(section_id),
+                                        "paragraph_id": str(paragraph_id),
+                                        "sentence_id": str(sentence.get_id()),
+                                        "content": sentence.get_content(),
+                                    }
+                                    for sentence in paragraph.sentences
+                                ],
+                            )
+                        )
+                    )
+                await asyncio.gather(*sentence_tasks)
+                summarized_paragraph = [
+                    await self.preprocess_service.summary_content(
+                        SummaryContentDto(
+                            content=paragraph.restore(),
+                            api_key=self.mcp_client.api_key
+                        )
+                ) if len(paragraph.restore()) >= self.openai_context_limit else paragraph.restore() for paragraph in section.paragraphs]
+                tasks.append(
                     self.preprocess_service.add_docs(
                         AddDocsToCollectionDto(
-                            texts=[
-                                sentence.get_content()
-                                for sentence in paragraph.sentences
-                            ],
+                            texts= summarized_paragraph,
                             collection_name=collection_name,
                             metadatas=[
                                 {
                                     "product_id": request.product_id,
                                     "section_id": str(section_id),
-                                    "paragraph_id": str(paragraph_id),
-                                    "sentence_id": str(sentence.get_id()),
-                                    "content": sentence.get_content(),
+                                    "paragraph_id": str(paragraph.get_id()),
+                                    "content": paragraph_content,
                                 }
-                                for sentence in paragraph.sentences
+                                for paragraph, paragraph_content in zip(section.paragraphs,summarized_paragraph)
                             ],
                         )
                     )
                 )
-            await asyncio.gather(*sentence_tasks)
-            summarized_paragraph = [
-                await self.preprocess_service.summary_content(
-                    SummaryContentDto(
-                        content=paragraph.restore(),
-                        api_key=self.mcp_client.api_key
-                    )
-            ) if len(paragraph.restore()) >= self.openai_context_limit else paragraph.restore() for paragraph in section.paragraphs]
-            tasks.append(
-                self.preprocess_service.add_docs(
-                    AddDocsToCollectionDto(
-                        texts= summarized_paragraph,
-                        collection_name=collection_name,
-                        metadatas=[
-                            {
-                                "product_id": request.product_id,
-                                "section_id": str(section_id),
-                                "paragraph_id": str(paragraph.get_id()),
-                                "content": paragraph_content,
-                            }
-                            for paragraph, paragraph_content in zip(section.paragraphs,summarized_paragraph)
-                        ],
-                    )
-                )
-            )
-        await asyncio.gather(*tasks)
-        return True
+            await asyncio.gather(*tasks)
+            return True
+        except Exception as e:
+            self.logger.error(f"Error in add_product_to_vector_db: {e}")
+            return False
 
     async def get_most_relevant_products(self, request: GetMostRelevantProductsRequest):
         prompt = f"""
             You are a product recommendation system. You are given a user profile.
-            You need to return the query term so that we can search for the most relevant products in a vector database.
+            You need to return query terms and phrases so that we can search for the most relevant products in a vector database.
             User profile: {request.user_profile}
-            Return only the query term, with no other text, no explanation, no markdown, no formatting.
+            Return results in a json format, with no other text, no explanation, no markdown, no formatting.
+            The json format should be like this:
+            {{
+                "relevant_results": {{
+                    "text": "query term or phrases inferred from the profile",
+                    "weight": "weight of the query term or phrases, from 0 to 1"
+                }}[]
+            }}
         """
 
-        query_term = await self.mcp_client.client.chat.completions.create(
+        query_term = self.mcp_client.client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": request.user_profile}
             ]
         )
+        term_results = json.loads(query_term.choices[0].message.content)
 
-        similar_results = VectorDatabase.find_similar(
-            query_embedding=query_term,
-            limit=30
-        )
+        self.logger.info(f"Term results: {term_results}")
+
+        relevant_results = term_results.get("relevant_results", [])
+        # Get the embedding for each result in relevant_results
+        embedding_with_weight = []
+        for relevant_result in relevant_results:
+            embedding = self.mcp_client.client.embeddings.create(
+                model="text-embedding-3-large",
+                input=relevant_result.get('text')
+            )
+            # The embedding vector is typically in embedding.data[0].embedding
+            embedding_with_weight.append({
+                "embedding": embedding.data[0].embedding,
+                "weight": relevant_result.get("weight", 0)
+            })
+    
 
         product_scores = defaultdict(list)
-        for result in similar_results:
-            product_id = result["metadata"].get("product_id")
-            score = result.get("score", 0)
-            if product_id:
-                product_scores[product_id].append(score)
+        for embedding_with_weight in embedding_with_weight:
+            similar_results = VectorDatabase.find_similar(
+                query_embedding=embedding_with_weight.get("embedding"),
+                limit=10,
+                min_score=0.5
+            )
+        
+            for result in similar_results:
+                product_id = result["metadata"].get("product_id")
+                distance = result.get("score", 0)
+                if product_id:
+                    term_weight = embedding_with_weight.get("weight", 0)
+                    if distance > 0 and term_weight > 0:
+                        combined_score = distance * (term_weight ** self.weight_exponent)
+                    else:
+                        combined_score = 0
+
+                    product_scores[product_id].append(combined_score)
 
         all_counts = [len(scores) for scores in product_scores.values()]
         all_avg_scores = [sum(scores)/len(scores) for scores in product_scores.values()]
@@ -161,7 +201,7 @@ class RecommendationsService:
             }
         ]
 
-        completion = await self.mcp_client.client.chat.completions.create(
+        completion = self.mcp_client.client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
             tools=available_tools
@@ -250,7 +290,7 @@ class RecommendationsService:
             "content": follow_up_prompt
         })
 
-        response = await self.mcp_client.client.chat.completions.create(
+        response = self.mcp_client.client.chat.completions.create(
             model="gpt-4o-mini",
             messages=follow_up_messages,
         )
