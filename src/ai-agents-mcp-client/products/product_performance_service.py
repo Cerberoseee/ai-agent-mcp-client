@@ -181,54 +181,38 @@ class ProductPerformanceService:
                 # New product flow
                 analysis_result = analysis_completion.choices[0].message.content or ""
                 
-                # Check if opportunity score is high enough to proceed with launch plan
-                opportunity_score = self._extract_opportunity_score(analysis_result)
+                # High opportunity - generate launch plan
+                launch_plan_completion = self.mcp_client.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=follow_up_messages + [{
+                        "role": "user",
+                        "content": """
+                        Based on this data, use the available tools to generate appropriate pricing, content and inventory for this product.
+                        """
+                    }],
+                    tools=available_tools,
+                    tool_choice="auto"
+                )
                 
-                if opportunity_score >= 8:
-                    # High opportunity - generate launch plan
-                    launch_plan_completion = self.mcp_client.client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=follow_up_messages + [{
-                            "role": "user",
-                            "content": """
-                            Generate a detailed launch plan for this product including:
-                            1. Optimal launch price
-                            2. Initial inventory recommendation
-                            3. Marketing content package (title, description, bullet points)
-                            4. Expected ROI
-                            
-                            Use the available tools to calculate pricing, inventory, and generate content.
-                            """
-                        }],
-                        tools=available_tools,
-                        tool_choice="auto"
-                    )
-                    
-                    # Process the launch plan tool calls
-                    launch_plan_tool_calls = launch_plan_completion.choices[0].message.tool_calls
-                    launch_plan_adjustments = []
-                    
-                    for tool_call in launch_plan_tool_calls:
-                        tool_args = json.loads(tool_call.function.arguments)
-                        launch_plan_adjustments.append(
-                            AdjustmentSuggestion(
-                                type=tool_call.function.name,
-                                current_value=request.productDetails,
-                                suggested_value=tool_args,
-                            )
+                # Process the launch plan tool calls
+                launch_plan_tool_calls = launch_plan_completion.choices[0].message.tool_calls
+                launch_plan_adjustments = []
+                
+                for tool_call in launch_plan_tool_calls:
+                    tool_args = json.loads(tool_call.function.arguments)
+                    launch_plan_adjustments.append(
+                        AdjustmentSuggestion(
+                            type=tool_call.function.name,
+                            current_value=request.productDetails,
+                            suggested_value=tool_args,
                         )
-                    
-                    
-                    return AnalysisResponse(
-                        suggested_adjustments=launch_plan_adjustments,
-                        analysis=analysis_result
                     )
-                else:
-                    # Low opportunity - reject product with analysis
-                    return AnalysisResponse(
-                        suggested_adjustments=[],
-                        analysis=analysis_result
-                    )
+                
+                
+                return AnalysisResponse(
+                    suggested_adjustments=launch_plan_adjustments,
+                    analysis=analysis_result
+                )
                 
         except Exception as e:
             self.logger.error(f"Error in analyze_performance: {e}")
